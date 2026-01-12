@@ -5,10 +5,10 @@ This was my attempt at the 1 billion row challenge. It was a great experience an
 ## Timeline
 Because there are multiple file I think its important you know the timeline of progress:
 
--`base_line.cpp`
--`mapped_memory.cpp`
--`custom_table.cpp`
--`multithreaded.cpp`
+- `base_line.cpp`
+- `mapped_memory.cpp`
+- `custom_table.cpp`
+- `multithreaded.cpp`
 
 Each one got progressivly faster with the final landing at ~1.2 seconds on my machine.
 
