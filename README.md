@@ -1,17 +1,24 @@
 # 1brc
 
-This was my attempt at the 1 billion row challenge. It was a great experiance and I highly reccomend you give it a shot. 
+This was my attempt at the 1 billion row challenge. It was a great experience and I highly recommend you give it a shot. 
 
 ## Timeline
 Because there are multiple file I think its important you know the timeline of progress:
-    -`base_line.cpp`
-    -`mapped_memory.cpp`
-    -`custom_table.cpp`
-    -`multithreaded.cpp`
+
+-`base_line.cpp`
+-`mapped_memory.cpp`
+-`custom_table.cpp`
+-`multithreaded.cpp`
+
 Each one got progressivly faster with the final landing at ~1.2 seconds on my machine.
 
 ## Running 
-I compiled the file using `clang++ -O3 file.cpp -o file` so nothing complicated just do that and run it and you will be good to go.
+I compiled the file using clang so nothing complicated just do the following and run it and you will be good to go.
+
+```
+clang++ -O3 file.cpp -o file
+./file
+```
 
 
 ## Cont.
