@@ -1,8 +1,14 @@
+//
+//	Benchmark 1: ./multithreaded
+//  	Time (mean ± σ):      1.224 s ±  0.036 s    [User: 30.479 s, System:
+//  0.669 s] 	Range (min … max):    1.146 s …  1.263 s    10 runs
+
 #include <algorithm>
 #include <cstdint>
 #include <fcntl.h>
 #include <iomanip>
 #include <iostream>
+#include <string.h>
 #include <string_view>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -10,100 +16,115 @@
 #include <unistd.h>
 #include <vector>
 
-// 30.17s user 0.69s system 2698% cpu 1.144 total
-//
-//	Benchmark 1: ./multithreaded
-//  	Time (mean ± σ):      1.224 s ±  0.036 s    [User: 30.479 s, System: 0.669 s]
-//  	Range (min … max):    1.146 s …  1.263 s    10 runs
-
 constexpr int TABLE_SIZE = 16384;
 
-struct Stats {
-  int16_t min;
-  int16_t max;
-  int32_t sum;
-  int64_t cnt;
-};
+// This cache alignment is not very good
+// the bool has 7 padded bytes for alignment
+// TODO: see if there is a better way to pack this
 
+// Packed stats into just entry and made cnt smaller,
+// now at 32 bytes we can fit 2 entrys in a cache line
+// shaved of ~0.02 secs
 struct Entry {
   std::string_view name;
-  Stats stats;
-  bool occupied;
+  int64_t sum;
+  int32_t cnt;
+  int16_t min;
+  int16_t max;
 };
 
 struct ThreadResult {
   Entry table[TABLE_SIZE] = {};
 };
 
-void update_stats(Entry *table, std::string_view name, int16_t temp,
-                  uint64_t hash) {
+void update_(Entry *table, std::string_view name, int16_t temp, uint64_t hash) {
+
   uint64_t idx = hash % TABLE_SIZE;
-  while (table[idx].occupied && table[idx].name != name) {
+  while (table[idx].name.data() != nullptr && table[idx].name != name) {
     idx = (idx + 1) % TABLE_SIZE;
   }
-  if (!table[idx].occupied) {
-    table[idx].occupied = true;
-    table[idx].name = name;
-    table[idx].stats = {temp, temp, temp, 1};
-  } else {
-    if (temp < table[idx].stats.min)
-      table[idx].stats.min = temp;
-    if (temp > table[idx].stats.max)
-      table[idx].stats.max = temp;
-    table[idx].stats.sum += temp;
-    table[idx].stats.cnt++;
+
+  if (!(table[idx].name.data() != nullptr)) {
+    table[idx] = {name, temp, temp, temp, 1};
+  }
+
+  else {
+    if (temp < table[idx].min)
+      table[idx].min = temp;
+
+    if (temp > table[idx].max)
+      table[idx].max = temp;
+
+    table[idx].sum += temp;
+    table[idx].cnt++;
   }
 }
 
 void process_chunk(char *start, char *end, ThreadResult &result) {
   char *cursor = start;
   while (cursor < end) {
+
     if (*cursor == '\n' || *cursor == '\r' || *cursor == ' ') {
       cursor++;
       continue;
     }
-    uint64_t hash = 0;
-    char *semicolon = cursor;
-    while (semicolon < end && *semicolon != ';') {
-      hash = (hash * 31) + static_cast<unsigned char>(*semicolon);
-      semicolon++;
+
+    uint64_t hash{0};
+    char *name_start = cursor;
+
+    while (*cursor != ';') {
+      hash = (hash * 31) + static_cast<unsigned char>(*cursor);
+      cursor++;
     }
-    if (semicolon >= end)
-      break;
-    char *newline = semicolon + 1;
-    while (newline < end && *newline != '\n') {
-      newline++;
+
+    // This didnt actually help and increased time by 0.1 secs
+    // try to take out the branching and vectorize the search for ;
+    // char *semicolon = static_cast<char *>(memchr(cursor, ';', end - cursor));
+    // size_t length = semicolon - cursor;
+    // for (size_t i = 0; i < length; ++i) {
+    //  hash = (hash * 31) + static_cast<unsigned char>(cursor[i]);
+    //}
+
+    std::string_view city(name_start, cursor - name_start);
+
+    int16_t sign = 1;
+    if (*cursor == '-') {
+      sign = -1;
+      cursor++;
     }
-    std::string_view city(cursor, semicolon - cursor);
-    int16_t temp = 0;
-    bool negative = false;
-    for (char *curr = semicolon + 1; curr < newline; ++curr) {
-      if (*curr == '-')
-        negative = true;
-      else if (*curr >= '0' && *curr <= '9') {
-        temp = temp * 10 + (*curr - '0');
-      }
+
+    // We know that the format is either N.N or NN.N so we can remove some
+    // branching
+    int16_t temp{0};
+    if (cursor[1] == '.') {
+      temp = (cursor[0] - '0') * 10 + (cursor[2] - '0');
+      cursor += 4;
+    } else {
+      temp =
+          (cursor[0] - '0') * 100 + (cursor[1] - '0') * 10 + (cursor[3] - '0');
+      cursor += 5;
     }
-    if (negative)
-      temp = -temp;
-    update_stats(result.table, city, temp, hash);
-    cursor = newline + 1;
+
+    temp *= sign;
+    update_(result.table, city, temp, hash);
   }
 }
 
 int main() {
+
   int fd = open("../1brc/measurements.txt", O_RDONLY);
   if (fd == -1)
     return 1;
-  
+
   struct stat sb;
   fstat(fd, &sb);
   size_t file_size = sb.st_size;
   char *file_ptr =
       static_cast<char *>(mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0));
-  
+
   if (file_ptr == MAP_FAILED)
     return 1;
+
   madvise(file_ptr, file_size, MADV_SEQUENTIAL | MADV_WILLNEED);
 
   unsigned int num_threads = std::thread::hardware_concurrency();
@@ -115,13 +136,13 @@ int main() {
   size_t chunk_size = file_size / num_threads;
 
   for (unsigned int i = 0; i < num_threads; ++i) {
-    
-	char *chunk_start = file_ptr + (i * chunk_size);
+
+    char *chunk_start = file_ptr + (i * chunk_size);
     char *chunk_end = (i == num_threads - 1)
                           ? (file_ptr + file_size)
                           : (file_ptr + (i + 1) * chunk_size);
-    
-	if (i > 0) {
+
+    if (i > 0) {
       while (chunk_start < (file_ptr + file_size) && *(chunk_start - 1) != '\n')
         chunk_start++;
     }
@@ -130,6 +151,7 @@ int main() {
       while (chunk_end < (file_ptr + file_size) && *(chunk_end - 1) != '\n')
         chunk_end++;
     }
+
     ThreadResult *res = new ThreadResult();
     results.push_back(res);
     threads.emplace_back(process_chunk, chunk_start, chunk_end, std::ref(*res));
@@ -138,37 +160,38 @@ int main() {
   for (auto &t : threads)
     t.join();
 
+  // this is O(n^2) to bring it to the front
   Entry *master = results[0]->table;
   for (size_t i = 1; i < results.size(); ++i) {
     for (int j = 0; j < TABLE_SIZE; ++j) {
 
-      if (results[i]->table[j].occupied) {
-      
-		std::string_view name = results[i]->table[j].name;
-        uint64_t hash = 0;
-        
-		for (char c : name)
+      if (results[i]->table[j].name.data() != nullptr) {
+
+        std::string_view name = results[i]->table[j].name;
+        uint64_t hash{0};
+
+        for (char c : name)
           hash = (hash * 31) + static_cast<unsigned char>(c);
-        
-		uint64_t idx = hash % TABLE_SIZE;
-        
-		while (master[idx].occupied && master[idx].name != name) {
+
+        uint64_t idx = hash % TABLE_SIZE;
+
+        while (master[idx].name.data() != nullptr && master[idx].name != name) {
           idx = (idx + 1) % TABLE_SIZE;
         }
-        
-		if (!master[idx].occupied) {
-          master[idx] = results[i]->table[j];
-        } 
 
-		else {
-          if (results[i]->table[j].stats.min < master[idx].stats.min)
-            master[idx].stats.min = results[i]->table[j].stats.min;
-        
-		  if (results[i]->table[j].stats.max > master[idx].stats.max)
-            master[idx].stats.max = results[i]->table[j].stats.max;
-          
-		  master[idx].stats.sum += results[i]->table[j].stats.sum;
-          master[idx].stats.cnt += results[i]->table[j].stats.cnt;
+        if (!(master[idx].name.data() != nullptr)) {
+          master[idx] = results[i]->table[j];
+        }
+
+        else {
+          if (results[i]->table[j].min < master[idx].min)
+            master[idx].min = results[i]->table[j].min;
+
+          if (results[i]->table[j].max > master[idx].max)
+            master[idx].max = results[i]->table[j].max;
+
+          master[idx].sum += results[i]->table[j].sum;
+          master[idx].cnt += results[i]->table[j].cnt;
         }
       }
     }
@@ -176,8 +199,10 @@ int main() {
 
   int active_count = 0;
   for (int i = 0; i < TABLE_SIZE; ++i) {
-    if (master[i].occupied)
-      master[active_count++] = master[i];
+    if (master[i].name.data() != nullptr) {
+      master[active_count] = master[i];
+      active_count++;
+    }
   }
 
   std::sort(master, master + active_count,
@@ -185,7 +210,7 @@ int main() {
 
   std::cout << std::fixed << std::setprecision(1) << "{";
   for (int i = 0; i < active_count; ++i) {
-    const auto &s = master[i].stats;
+    const auto &s = master[i];
     std::cout << master[i].name << "=" << s.min / 10.0f << "/"
               << (s.sum / static_cast<float>(s.cnt)) / 10.0f << "/"
               << s.max / 10.0f << (i == active_count - 1 ? "" : ", ");
