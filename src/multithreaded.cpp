@@ -18,10 +18,6 @@
 
 constexpr int TABLE_SIZE = 16384;
 
-// This cache alignment is not very good
-// the bool has 7 padded bytes for alignment
-// TODO: see if there is a better way to pack this
-
 // Packed stats into just entry and made cnt smaller,
 // now at 32 bytes we can fit 2 entrys in a cache line
 // shaved of ~0.02 secs
