@@ -10,7 +10,7 @@ Because there are multiple file I think its important you know the timeline of p
 - `custom_table.cpp`
 - `multithreaded.cpp`
 
-Each one got progressivly faster with the final landing at ~1.2 seconds on my machine.
+Each one got progressivly faster with the final landing at ~1.03 seconds on my machine.
 
 ## Running 
 I compiled the file using clang so nothing complicated just do the following and run it and you will be good to go.

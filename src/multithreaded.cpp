@@ -1,7 +1,7 @@
 //
-//	Benchmark 1: ./multithreaded
-//  	Time (mean ± σ):      1.224 s ±  0.036 s    [User: 30.479 s, System:
-//  0.669 s] 	Range (min … max):    1.146 s …  1.263 s    10 runs
+//  Benchmark 1: ./multithreaded
+//    Time (mean ± σ):      1.037 s ±  0.011 s    [User: 24.107 s, System: 0.679
+//    Range (min … max):    1.015 s …  1.054 s    10 runs
 
 #include <algorithm>
 #include <cstdint>
